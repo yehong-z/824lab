@@ -3,6 +3,8 @@ package mr
 import (
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 )
 import "log"
@@ -31,6 +33,7 @@ func Worker(mapf func(string, string) []KeyValue,
 
 	// uncomment to send the Example RPC to the coordinator.
 	// CallExample()
+	pid := os.Getpid()
 
 	for {
 		task, err := GetTask()
@@ -40,10 +43,43 @@ func Worker(mapf func(string, string) []KeyValue,
 
 		if task.TaskType == TASK_MAP {
 			log.Println("run map")
-			time.Sleep(time.Millisecond * 100)
+			KV := mapf(task.File, GetContent(task.File))
+
+			res, _ := CommitTask(task.ID, task.TaskType, task.File)
+			if res.Accept == true {
+				// TODO 将结果写入文件
+				kkv := make(map[int][]KeyValue)
+				for _, kv := range KV {
+					hashKey := ihash(kv.Key) % task.NReduce
+					kkv[hashKey] = append(kkv[hashKey], kv)
+				}
+
+				for hashKey, KVList := range kkv {
+					var b strings.Builder
+					for _, kvpair := range KVList {
+						fmt.Fprintf(&b, "%v %v\n", kvpair.Key, kvpair.Value)
+					}
+
+					newFilename := fmt.Sprintf("%v%v-%v", REDUCE_INTUT, hashKey, pid)
+					outputFile, _ := os.OpenFile(newFilename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+					if err != nil {
+						fmt.Println("Error creating file:", err)
+						return
+					}
+
+					fmt.Fprintf(outputFile, b.String())
+					outputFile.Close()
+				}
+			}
+			// TODO 告知master写入完成
+
 		} else if task.TaskType == TASK_REDUCE {
 			log.Println("run reduce")
-			time.Sleep(time.Millisecond * 100)
+			res, _ := CommitTask(task.ID, task.TaskType, task.File)
+			if res.Accept == true {
+				// TODO 将结果写入文件
+			}
+
 		} else if task.TaskType == TASK_WAIT {
 			log.Println("empty task wait")
 			time.Sleep(time.Millisecond * 100)
@@ -72,9 +108,21 @@ func GetTask() (*GetTaskReply, error) {
 
 }
 
-// 提交任务给调度器
-func CommitTask() {
-
+// 提交任务
+func CommitTask(id int, t TaskType, file string) (*CommitTaskReply, error) {
+	args := &CommitTaskArgs{
+		ID:   id,
+		Type: t,
+		File: file,
+	}
+	re := &CommitTaskReply{}
+	ok := call("Coordinator.CommitTask", args, re)
+	if ok {
+		log.Println(re)
+		return re, nil
+	} else {
+		return nil, errors.New(RPC_ERROR)
+	}
 }
 
 // example function to show how to make an RPC call to the coordinator.

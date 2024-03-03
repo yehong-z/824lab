@@ -10,7 +10,13 @@ const (
 )
 
 const (
-	MR_OUTPUT = "mr-out-"
+	COMMIT_MAP    = 1
+	COMMIT_REDUCE = 2
+)
+
+const (
+	REDUCE_INTUT = "reduce-input-"
+	MR_OUTPUT    = "mr-out-"
 )
 
 const (

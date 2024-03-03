@@ -3,6 +3,7 @@ package mr
 import (
 	"log"
 	"sync"
+	"time"
 )
 import "net"
 import "os"
@@ -11,10 +12,41 @@ import "net/http"
 
 type Coordinator struct {
 	// Your definitions here.
-	finished  bool
-	mu        sync.RWMutex
-	taskQueue chan Task // map和reduce的任务队列
-	nReduce   int       // 用于哈希
+	finished        bool
+	mu              sync.RWMutex
+	mapTaskQueue    chan Task // map的任务队列
+	reduceTaskQueue chan Task // reduce 任务队列
+	nReduce         int       // 用于哈希
+	taskID          int
+	tasks           map[int]struct{} // 已经发布任务
+}
+
+func (c *Coordinator) AddTask(t *Task) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.taskID++
+	t.id = c.taskID
+	c.tasks[t.id] = struct{}{}
+
+	go func() {
+		// 超时后重新加入任务
+		time.Sleep(time.Millisecond * 100)
+		c.RecoverTask(t)
+	}()
+}
+
+func (c *Coordinator) RecoverTask(t *Task) {
+	c.mu.Lock()
+	c.mu.Unlock()
+	if _, ok := c.tasks[t.id]; ok {
+		if t.tt == TASK_MAP {
+			c.mapTaskQueue <- *t
+		} else if t.tt == TASK_REDUCE {
+			c.reduceTaskQueue <- *t
+		}
+
+		delete(c.tasks, t.id)
+	}
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -62,9 +94,10 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	// 初始化操作
 	c.nReduce = nReduce
 	c.finished = false
-	c.taskQueue = make(chan Task, 100)
+	c.tasks = make(map[int]struct{})
+	c.mapTaskQueue = make(chan Task, 100)
 	for _, file := range files {
-		c.taskQueue <- Task{
+		c.mapTaskQueue <- Task{
 			file: file,
 			tt:   TASK_MAP,
 		}
