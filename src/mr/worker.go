@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode"
 )
 import "log"
 import "net/rpc"
@@ -33,7 +34,7 @@ func Worker(mapf func(string, string) []KeyValue,
 
 	// uncomment to send the Example RPC to the coordinator.
 	// CallExample()
-	pid := os.Getpid()
+	// pid := os.Getpid()
 
 	for {
 		task, err := GetTask()
@@ -42,8 +43,12 @@ func Worker(mapf func(string, string) []KeyValue,
 		}
 
 		if task.TaskType == TASK_MAP {
-			log.Println("run map")
-			KV := mapf(task.File, GetContent(task.File))
+			//log.Println("run map")
+			cont, err := GetContent(task.File)
+			if err != nil {
+				continue
+			}
+			KV := mapf(task.File, cont)
 
 			res, _ := CommitTask(task.ID, task.TaskType, task.File)
 			if res.Accept == true {
@@ -60,7 +65,7 @@ func Worker(mapf func(string, string) []KeyValue,
 						fmt.Fprintf(&b, "%v %v\n", kvpair.Key, kvpair.Value)
 					}
 
-					newFilename := fmt.Sprintf("%v%v-%v", REDUCE_INTUT, hashKey, pid)
+					newFilename := fmt.Sprintf("%v%v", REDUCE_INTUT, hashKey)
 					outputFile, _ := os.OpenFile(newFilename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 					if err != nil {
 						fmt.Println("Error creating file:", err)
@@ -71,20 +76,57 @@ func Worker(mapf func(string, string) []KeyValue,
 					outputFile.Close()
 				}
 			}
-			// TODO 告知master写入完成
+			_ = FinishTask(task.TaskType, task.ID)
 
 		} else if task.TaskType == TASK_REDUCE {
-			log.Println("run reduce")
-			res, _ := CommitTask(task.ID, task.TaskType, task.File)
-			if res.Accept == true {
-				// TODO 将结果写入文件
+			//log.Println("run reduce")
+			// 完成reduce任务
+			filename := fmt.Sprintf("%v%v", REDUCE_INTUT, task.ReduceNum)
+			contents, err := GetContent(filename)
+			if err != nil {
+				continue
+			}
+			ff := func(r rune) bool {
+				return unicode.IsSpace(r)
+			}
+			words := strings.FieldsFunc(contents, ff)
+
+			intermediate := make(map[string][]string)
+			reduceResult := make(map[string]string)
+			for i := 0; i < len(words); i += 2 {
+				key := words[i]
+				value := words[i+1]
+				intermediate[key] = append(intermediate[key], value)
 			}
 
+			for k, v := range intermediate {
+				reduceResult[k] = reducef(k, v)
+			}
+
+			res, _ := CommitTask(task.ID, task.TaskType, task.File)
+			if res.Accept == true {
+				var b strings.Builder
+				for resultK, resultV := range reduceResult {
+					fmt.Fprintf(&b, "%v %v\n", resultK, resultV)
+				}
+
+				newFilename := fmt.Sprintf("%v%v", MR_OUTPUT, task.ReduceNum)
+				outputFile, _ := os.OpenFile(newFilename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+				if err != nil {
+					fmt.Println("Error creating file:", err)
+					return
+				}
+
+				fmt.Fprintf(outputFile, b.String())
+				outputFile.Close()
+			}
+			FinishTask(task.TaskType, task.ID)
+
 		} else if task.TaskType == TASK_WAIT {
-			log.Println("empty task wait")
+			//log.Println("empty task wait")
 			time.Sleep(time.Millisecond * 100)
 		} else if task.TaskType == TASK_CLOSE {
-			log.Println("connect close")
+			// log.Println("connect close")
 			break
 		} else {
 			log.Println("default ", task)
@@ -100,7 +142,7 @@ func GetTask() (*GetTaskReply, error) {
 	re := &GetTaskReply{}
 	ok := call("Coordinator.GetTask", &GetTaskArgs{}, re)
 	if ok {
-		log.Println(re)
+		// log.Println(re)
 		return re, nil
 	} else {
 		return nil, errors.New(RPC_ERROR)
@@ -118,10 +160,25 @@ func CommitTask(id int, t TaskType, file string) (*CommitTaskReply, error) {
 	re := &CommitTaskReply{}
 	ok := call("Coordinator.CommitTask", args, re)
 	if ok {
-		log.Println(re)
+		//log.Println(re)
 		return re, nil
 	} else {
 		return nil, errors.New(RPC_ERROR)
+	}
+}
+
+// 落盘后再提交
+func FinishTask(t TaskType, id int) error {
+	args := &FinishTaskArgs{
+		ID:   id,
+		Type: t,
+	}
+	re := &FinishTaskReply{}
+	ok := call("Coordinator.FinishTask", args, re)
+	if ok {
+		return nil
+	} else {
+		return errors.New(RPC_ERROR)
 	}
 }
 

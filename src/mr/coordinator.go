@@ -12,13 +12,15 @@ import "net/http"
 
 type Coordinator struct {
 	// Your definitions here.
-	finished        bool
+	state           State
 	mu              sync.RWMutex
 	mapTaskQueue    chan Task // map的任务队列
 	reduceTaskQueue chan Task // reduce 任务队列
 	nReduce         int       // 用于哈希
 	taskID          int
 	tasks           map[int]struct{} // 已经发布任务
+	mapNum          int
+	reduceNum       int
 }
 
 func (c *Coordinator) AddTask(t *Task) {
@@ -30,7 +32,7 @@ func (c *Coordinator) AddTask(t *Task) {
 
 	go func() {
 		// 超时后重新加入任务
-		time.Sleep(time.Millisecond * 100)
+		time.Sleep(time.Second * 10)
 		c.RecoverTask(t)
 	}()
 }
@@ -78,10 +80,12 @@ func (c *Coordinator) server() {
 func (c *Coordinator) Done() bool {
 	// Your code here.
 	c.mu.RLock()
-	ret := c.finished
-	c.mu.RUnlock()
+	defer c.mu.RUnlock()
+	if c.state == STATE_FINISH {
+		return true
+	}
 
-	return ret
+	return false
 }
 
 // create a Coordinator.
@@ -93,13 +97,23 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	// Your code here.
 	// 初始化操作
 	c.nReduce = nReduce
-	c.finished = false
+	c.state = STATE_MAP
 	c.tasks = make(map[int]struct{})
 	c.mapTaskQueue = make(chan Task, 100)
+	c.reduceTaskQueue = make(chan Task, 100)
+	c.mapNum = len(files)
+	c.reduceNum = nReduce
 	for _, file := range files {
 		c.mapTaskQueue <- Task{
 			file: file,
 			tt:   TASK_MAP,
+		}
+	}
+
+	for i := 0; i < nReduce; i++ {
+		c.reduceTaskQueue <- Task{
+			tt:        TASK_REDUCE,
+			reduceNum: i,
 		}
 	}
 

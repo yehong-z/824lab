@@ -16,7 +16,7 @@ func (c *Coordinator) CommitTask(args *CommitTaskArgs, reply *CommitTaskReply) e
 	defer c.mu.Unlock()
 	if _, ok := c.tasks[args.ID]; ok {
 		reply.Accept = true
-		delete(c.tasks, args.ID)
+
 	} else {
 		reply.Accept = false
 	}

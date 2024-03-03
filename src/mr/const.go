@@ -9,13 +9,21 @@ const (
 	TASK_CLOSE  = 4
 )
 
+type State int
+
+const (
+	STATE_FINISH = 0
+	STATE_MAP    = 1
+	STATE_REDUCE = 2
+)
+
 const (
 	COMMIT_MAP    = 1
 	COMMIT_REDUCE = 2
 )
 
 const (
-	REDUCE_INTUT = "reduce-input-"
+	REDUCE_INTUT = "mr-tmp-"
 	MR_OUTPUT    = "mr-out-"
 )
 
